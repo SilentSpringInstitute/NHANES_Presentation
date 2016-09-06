@@ -8,13 +8,15 @@ library(dplyr)
 library(reshape2)
 
 ##### BPA Exposure ######
-bpa_data_2011 <- nhanes_load_data("EPH_G", "2011-2012", demographics = TRUE)
+bpa_data_2011 <- nhanes_load_data("EPH_G", "2011-2012", demographics = TRUE,
+                                  destination = "./nhanes_data")
 
 nhanes_quantile(bpa_data_2011, "URXBPH", "URDBPHLC", quantiles = c(0.5, 0.95))
 nhanes_detection_frequency(bpa_data_2011, "URXBPH", "URDBPHLC")
 
 ##### Download PFCs dataset #####
-pfc_data_2011 <- nhanes_load_data("PFC_G", "2011-2012", demographics = TRUE)
+pfc_data_2011 <- nhanes_load_data("PFC_G", "2011-2012", demographics = TRUE,
+                                  destination = "./nhanes_data")
 
 ##### Columns we would like to analyze #####
 columns <- c(
@@ -100,7 +102,8 @@ quantiles <- nhanes_quantile(pfc_data_2011,
                              columns,
                              comment_columns,
                              weights_column = "WTSA2YR",
-                             quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95))
+                             quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95),
+                             destination = "./nhanes_data")
 
 # 
 # In order to plot this using ggplot, we need to reformat the data returned from nhanes_quantile.
@@ -124,7 +127,8 @@ cycles <- c("2003-2004", "2005-2006", "2007-2008", "2009-2010", "2011-2012")
 
 pfcs <- nhanes_load_data(file_names,
                          cycles,
-                         demographics = TRUE)
+                         demographics = TRUE,
+                         destination = "./nhanes_data")
 
 analysis <- data.frame(
   file_name = file_names,
@@ -170,3 +174,46 @@ ggplot(cors, aes(x = Var1, y = Var2, fill = value)) +
 #
 library(circlize)
 chordDiagram(cors %>% filter(Var1 != Var2, abs(value) >= 0.5))
+
+##### Food vs. PFCs #####
+
+food <- nhanes_load_data("DR1IFF_G", "2011-2012", demographics = TRUE, destination = "./nhanes_data")
+
+food_summary <- food %>% group_by(SEQN) %>% summarise(calories = sum(DR1IKCAL))
+
+pfc_data_2011_with_food <- left_join(pfc_data_2011, food_summary, by = "SEQN") %>% as.data.frame()
+pfc_data_2011_with_food <- pfc_data_2011_with_food %>% filter(!is.na(calories))
+
+nhanes_quantile(pfc_data_2011_with_food,
+                column = "calories",
+                comment_column = FALSE,
+                quantiles = c(0.5))
+
+
+nhanes_quantile(pfc_data_2011_with_food,
+                column = "LBXPFOS",
+                comment_column = "LBDPFOSL",
+                quantiles = c(0.5),
+                filter = calories >= 1999)
+
+# hmm, there might be something interesting here. Let's make a boxplot
+
+low_group <- nhanes_quantile(pfc_data_2011_with_food,
+                             column = "LBXPFOS",
+                             comment_column = "LBDPFOSL",
+                             quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95),
+                             filter = calories < 1999)
+low_group$group <- "Low"
+
+high_group <- nhanes_quantile(pfc_data_2011_with_food,
+                             column = "LBXPFOS",
+                             comment_column = "LBDPFOSL",
+                             quantiles = c(0.05, 0.25, 0.5, 0.75, 0.95),
+                             filter = calories >= 1999)
+high_group$group <- "High"
+combined <- rbind(low_group, high_group)
+
+combined <- combined %>% spread(quantile, value)
+
+ggplot(combined, aes(x = group, ymin = `5%`, lower = `25%`, middle = `50%`, upper = `75%`, ymax = `95%`)) +
+  geom_boxplot(stat = "identity")
